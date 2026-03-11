@@ -71,9 +71,8 @@ export default async function handler(req, res) {
     const properties = {
       'Name':          { title:     [{ text: { content: name } }] },
       'Email':         { email },
-      'Channel':       { rich_text: [{ text: { content: 'Northeastern' } }] },
+      'Channel':       { rich_text: [{ text: { content: 'Luma' } }] },
       'Workshop Name': { rich_text: [{ text: { content: eventName } }] },
-      'Status':        { status:    { name: 'Registered' } },
     };
 
     if (eventDate) {
