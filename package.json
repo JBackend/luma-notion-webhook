@@ -1,0 +1,12 @@
+{
+  "name": "luma-notion-webhook",
+  "version": "1.0.0",
+  "description": "Luma → 021:Events Student Registry (Notion) webhook handler",
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "devDependencies": {
+    "vercel": "^50.29.0"
+  }
+}
