@@ -1,9 +1,9 @@
-// Luma → 021:Events Student Registry
-// Receives a webhook from Luma when a guest registers, adds them to Notion.
+// Maven → 021:Events Maven Student Registry
+// Receives webhooks from Maven for student lifecycle events, syncs to Notion.
 //
 // Environment variables (set in Vercel dashboard):
-//   NOTION_TOKEN         — your Notion integration token
-//   NOTION_DATABASE_ID   — the Student Registry database ID
+//   NOTION_TOKEN              — your Notion integration token
+//   MAVEN_NOTION_DATABASE_ID  — the Maven Student Registry database ID
 
 export const config = {
   api: { bodyParser: false }
@@ -18,17 +18,27 @@ function getRawBody(req) {
   });
 }
 
+// Events we ignore (no Notion action needed)
+const IGNORE_EVENTS = new Set([
+  'waitlist.unsubscribed',
+  'payment.initiated',
+  'payment.abandoned',
+  'user_cohort.maybe',
+]);
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(200).json({ ok: true });
   }
 
-  const { NOTION_TOKEN, NOTION_DATABASE_ID } = process.env;
+  const { NOTION_TOKEN, MAVEN_NOTION_DATABASE_ID } = process.env;
 
-  if (!NOTION_TOKEN || !NOTION_DATABASE_ID) {
-    console.error('Missing env vars: NOTION_TOKEN or NOTION_DATABASE_ID');
+  if (!NOTION_TOKEN || !MAVEN_NOTION_DATABASE_ID) {
+    console.error('Missing env vars: NOTION_TOKEN or MAVEN_NOTION_DATABASE_ID');
     return res.status(500).json({ error: 'Server misconfigured' });
   }
+
+  const NOTION_DATABASE_ID = MAVEN_NOTION_DATABASE_ID;
 
   try {
     const raw = await getRawBody(req);
@@ -36,14 +46,27 @@ export default async function handler(req, res) {
 
     const payload = JSON.parse(raw);
 
-    // Luma payload: { data: { user_name, user_email, event: { name, start_at, ... }, ... } }
-    const data  = payload.data || payload;
-    const event = data.event || {};
+    // Log and return the full payload so we can see exactly what Maven sends
+    console.log('MAVEN FULL PAYLOAD:', JSON.stringify(payload, null, 2));
 
-    const name      = data.user_name || data.name || 'Unknown';
-    const email     = data.user_email || data.email;
-    const eventName = event.name || 'Unknown Event';
-    const eventDate = (event.start_at || '').split('T')[0] || null;
+    // DEBUG MODE: return the full payload in the response
+    if (payload._debug || process.env.MAVEN_DEBUG === 'true') {
+      return res.status(200).json({ debug: true, payload });
+    }
+
+    const event   = payload.event || '';
+    const email   = payload.user?.email || '';
+    const name    = payload.user?.preferred_name || payload.user?.name || '';
+    const course  = payload.course || '';
+    const cohort  = payload.cohort || '';
+    const amount  = payload.payment?.amount_total || '';
+
+    console.log(`Maven webhook: ${event} — ${email || name}`);
+
+    // Skip events we don't act on
+    if (IGNORE_EVENTS.has(event)) {
+      return res.status(200).json({ message: 'Event ignored', event });
+    }
 
     if (!email) {
       console.error('No email in payload');
@@ -68,17 +91,19 @@ export default async function handler(req, res) {
     }
 
     // Create new row
+    const workshopName = [course, cohort].filter(Boolean).join(' — ') || 'Maven Workshop';
     const today = new Date().toISOString().split('T')[0];
+
     const properties = {
-      'Name':          { title:     [{ text: { content: name } }] },
+      'Name':          { title:     [{ text: { content: name || email.split('@')[0] } }] },
       'Email':         { email },
-      'Channel':       { rich_text: [{ text: { content: 'Luma' } }] },
-      'Workshop Name': { rich_text: [{ text: { content: eventName } }] },
+      'Channel':       { rich_text: [{ text: { content: 'Maven' } }] },
+      'Workshop Name': { rich_text: [{ text: { content: workshopName } }] },
       'First Seen':    { date: { start: today } },
     };
 
-    if (eventDate) {
-      properties['Workshop Date'] = { date: { start: eventDate } };
+    if (amount) {
+      properties['Revenue'] = { number: parseFloat(amount) || 0 };
     }
 
     const createRes = await fetch('https://api.notion.com/v1/pages', {
@@ -96,8 +121,8 @@ export default async function handler(req, res) {
       return res.status(200).json({ error: 'Notion create failed', details: err });
     }
 
-    console.log(`Added: ${name} (${email}) — ${eventName}`);
-    return res.status(200).json({ message: 'Student added', name, email });
+    console.log(`Added: ${name} (${email}) — ${event}`);
+    return res.status(200).json({ message: 'Student added', email, event });
 
   } catch (err) {
     console.error('Error:', err.message);
